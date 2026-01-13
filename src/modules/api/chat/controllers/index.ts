@@ -16,4 +16,7 @@ export class ChatController {
   async joinChat(@Body() dto: JoinChatDto, @User() user: UserModel) {
     return await this.chatService.startChat(user, dto);
   }
+
+  @Post('send-message')
+  async sendMessage(){}
 }

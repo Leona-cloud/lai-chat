@@ -10,6 +10,14 @@ import {
 } from '@nestjs/websockets';
 import logger from 'moment-logger';
 import { Server, Socket } from 'socket.io';
+import { ChatService } from './services';
+import { UseGuards } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { DataStoredInToken } from '../auth/interfaces';
+import { jwtSecret } from '@/config';
+import { PrismaService } from '@/modules/core/prisma/services';
+import { WsAuthGuard } from './guards';
+import { MessageType } from '@prisma/client';
 
 interface RoomInfo {
   roomId: string;
@@ -23,9 +31,16 @@ interface RoomInfo {
     origin: '*',
   },
 })
+@UseGuards(WsAuthGuard)
 export class ChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
   @WebSocketServer() server: Server;
 
   private rooms: Map<string, RoomInfo> = new Map();
@@ -34,12 +49,47 @@ export class ChatGateway
     logger.log('WebSocket Gateway Initialized');
   }
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     logger.log('New user connected!', client.id);
 
-    client.broadcast.emit('user-joined', {
-      message: `New user joined the chat: ${client.id}`,
-    });
+    const token =
+      client.handshake.auth?.token ||
+      client.handshake.headers?.authorization?.split(' ')[1];
+
+    if (!token) {
+      client.disconnect();
+      return;
+    }
+
+    try {
+      const payload: DataStoredInToken = await this.jwtService.verifyAsync(
+        token,
+        {
+          secret: jwtSecret,
+        },
+      );
+
+      const user = await this.prisma.user.findUnique({
+        where: { identifier: payload.sub },
+        select: {
+          id: true,
+          email: true,
+        },
+      });
+
+      if (!user) {
+        client.disconnect();
+        return;
+      }
+
+      client.data.user = user;
+
+      client.broadcast.emit('user-joined', {
+        message: `New user joined the chat: ${client.id}`,
+      });
+    } catch {
+      client.disconnect();
+    }
   }
 
   handleDisconnect(client: Socket) {
@@ -127,14 +177,17 @@ export class ChatGateway
   }
 
   @SubscribeMessage('roomMessage')
-  handleRoomMessage(
-    @MessageBody() data: { roomId: string; message: string },
+  async handleRoomMessage(
+    @MessageBody()
+    data: { conversationId: string; message: string; type: MessageType },
     @ConnectedSocket() client: Socket,
-  ): void {
-    const { roomId, message } = data;
+  ): Promise<void> {
+    const user = client.data.user;
 
-    const room = this.rooms.get(roomId);
-    if (!room?.clients.has(client.id) || !client.rooms.has(roomId)) {
+    const { conversationId, message, type } = data;
+
+    const room = this.rooms.get(conversationId);
+    if (!room?.clients.has(client.id) || !client.rooms.has(conversationId)) {
       this.server
         .to(client.id)
         .emit('roomMessage', { error: 'You are not a member of this room!' });
@@ -145,14 +198,23 @@ export class ChatGateway
       room.lastActivity = new Date();
     }
 
-    this.server.to(roomId).emit('roomMessage', {
-      roomId,
-      message,
-      from: client.id,
-      timestamp: new Date().toISOString(),
+    const result = await this.chatService.sendMessage(user, {
+      conversationId: conversationId,
+      content: data.message,
+      type: type,
     });
 
-    logger.log(`Room message in ${roomId} from ${client.id}: ${message}`);
+    this.server.to(conversationId).emit('roomMessage', {
+      conversationId,
+      message: result.data.content,
+      from: { id: user.id, email: user.email },
+      type: result.data.type,
+      timestamp: result.data.createdAt,
+    });
+
+    logger.log(
+      `Room message in ${conversationId} from user ${user.id}: ${message}`,
+    );
   }
 
   @SubscribeMessage('listRooms')

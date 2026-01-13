@@ -1,7 +1,7 @@
 import { PrismaService } from '@/modules/core/prisma/services';
-import { ConversationType, User } from '@prisma/client';
-import { JoinChatDto } from '../dtos';
-import { JoinChatError } from '../errors';
+import { ConversationType, MessageType, User } from '@prisma/client';
+import { JoinChatDto, SendMessageDto } from '../dtos';
+import { InvalidConversationIdException, JoinChatError } from '../errors';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { buildResponse } from '@/utils';
 
@@ -24,7 +24,7 @@ export class ChatService {
       },
       include: { participants: true },
     });
-    console.log(existingChat)
+
     if (existingChat)
       return buildResponse({
         message: 'Chat started successfully',
@@ -62,5 +62,49 @@ export class ChatService {
     });
 
     return !!participant;
+  }
+
+  async sendMessage(user: User, options: SendMessageDto) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: {
+        id: options.conversationId,
+      },
+    });
+
+    if (!conversation) {
+      throw new InvalidConversationIdException(
+        'Conversation id is invalid.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const message = await this.prisma.message.create({
+      data: {
+        conversation: { connect: { id: conversation.id } },
+        sender: { connect: { id: user.id } },
+        content: options.content,
+        type: options.type,
+      },
+    });
+
+    await this.prisma.conversationMeta.upsert({
+      where: { conversationId: conversation.id },
+      update: {
+        lastMessage: options.content,
+        lastMessageAt: new Date(),
+        lastSenderId: user.id,
+      },
+      create: {
+        conversationId: options.conversationId,
+        lastMessage: options.content,
+        lastMessageAt: new Date(),
+        lastSenderId: user.id,
+      },
+    });
+
+    return buildResponse({
+      message: 'Message sent successfully.',
+      data: message,
+    });
   }
 }
