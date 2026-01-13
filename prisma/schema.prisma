@@ -1,0 +1,116 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  FILE
+}
+
+enum ConversationType {
+  DIRECT
+  GROUP
+}
+
+model User {
+  id         Int    @id @default(autoincrement())
+  identifier String @unique
+  firstName  String
+  lastName   String
+  email      String @unique
+  password   String
+
+  conversationParticipants ConversationParticipant[]
+  messages                 Message[]
+  messageReads             MessageRead[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("Users")
+}
+
+model Conversation {
+  id String @id @default(uuid())
+
+  participants ConversationParticipant[]
+  messages     Message[]
+  meta         ConversationMeta?
+  type         ConversationType          @default(DIRECT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+model ConversationParticipant {
+  id             String @id @default(uuid())
+  conversationId String
+  userId         Int
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model Message {
+  id             String @id @default(uuid())
+  conversationId String
+  senderId       Int
+
+  type    MessageType
+  content String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User          @relation(fields: [senderId], references: [id])
+  messageReads MessageRead[]
+
+  @@index([conversationId, createdAt])
+}
+
+model ConversationMeta {
+  id             String @id @default(uuid())
+  conversationId String @unique
+
+  lastMessage   String?
+  lastMessageAt DateTime?
+  lastSenderId  Int?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model MessageRead {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    Int
+  readAt    DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+}
