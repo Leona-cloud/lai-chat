@@ -26,7 +26,7 @@ interface RoomInfo {
   lastActivity: Date;
 }
 
-@WebSocketGateway(3005, {
+@WebSocketGateway({
   cors: {
     origin: '*',
   },
