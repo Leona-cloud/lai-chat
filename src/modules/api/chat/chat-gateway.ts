@@ -266,20 +266,4 @@ export class ChatGateway
       userId: user.id,
     });
   }
-
-  @SubscribeMessage('typing:stop')
-  handleTypingStop(
-    @MessageBody() data: { conversationId: string },
-    @ConnectedSocket() client: Socket,
-  ) {
-    const user = client.data.user;
-    const { conversationId } = data;
-
-    if (!client.rooms.has(conversationId)) return;
-
-    client.to(conversationId).emit('typing:stop', {
-      conversationId,
-      userId: user.id,
-    });
-  }
 }

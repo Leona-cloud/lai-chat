@@ -4,6 +4,7 @@ import { JoinChatDto, SendMessageDto } from '../dtos';
 import { InvalidConversationIdException, JoinChatError } from '../errors';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { buildResponse } from '@/utils';
+import { UserNotFoundException } from '../../auth/errors';
 
 @Injectable()
 export class ChatService {
@@ -105,6 +106,88 @@ export class ChatService {
     return buildResponse({
       message: 'Message sent successfully.',
       data: message,
+    });
+  }
+
+  async fetchMessages(user: User, userId: string) {
+    const participant = await this.prisma.user.findUnique({
+      where: {
+        identifier: userId,
+      },
+    });
+
+    if (!participant) {
+      throw new UserNotFoundException(
+        'User not found.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        type: ConversationType.DIRECT,
+        participants: { every: { userId: { in: [user.id, participant.id] } } },
+      },
+    });
+
+    if (!conversation) {
+      return buildResponse({
+        message: 'No messages found.',
+      });
+    }
+
+    const messages = await this.prisma.message.findMany({
+      where: {
+        conversationId: conversation.id,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    return buildResponse({
+      message: 'Messages fetched successfully.',
+      data: messages,
+    });
+  }
+
+  async fetchUsersInConversations(user: User) {
+    const conversations = await this.prisma.conversationParticipant.findMany({
+      where: {
+        userId: user.id,
+      },
+      include: {
+        conversation: {
+          include: {
+            participants: {
+              include: {
+                user: {
+                  select: {
+                    identifier: true,
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return buildResponse({
+      message: 'Users fetched successfully.',
+      data: conversations.map((c) => {
+        const otherParticipants = c.conversation.participants
+          .filter((p) => p.userId !== user.id)
+          .map((p) => p.user);
+
+        return {
+          conversationId: c.conversation.id,
+          users: otherParticipants,
+        };
+      }),
     });
   }
 }
