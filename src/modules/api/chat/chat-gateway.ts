@@ -251,7 +251,7 @@ export class ChatGateway
     logger.log(`Client ${client.id} left room ${roomId}`);
   }
 
-  @SubscribeMessage('typing:start')
+  @SubscribeMessage('typing')
   handleTypingStart(
     @MessageBody() data: { conversationId: string },
     @ConnectedSocket() client: Socket,
@@ -261,7 +261,7 @@ export class ChatGateway
 
     if (!client.rooms.has(conversationId)) return;
 
-    client.to(conversationId).emit('typing:start', {
+    client.to(conversationId).emit('typing', {
       conversationId,
       userId: user.id,
     });
